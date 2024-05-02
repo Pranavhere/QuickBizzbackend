@@ -5,6 +5,7 @@ load_dotenv()
 from datetime import datetime
 from flask import Flask, request, jsonify, session, render_template
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 import re
 from bson import ObjectId
 from bson.regex import Regex
@@ -151,9 +152,22 @@ def logout():
     return jsonify({'message': 'Logged out successfully'}), 200
 
 # Create (Add a Product)
+# image will be temporarily stored in uploads
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+
+# Create the uploads folder if it does not exist
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 @app.route('/products', methods=['POST'])
 def create_product():
-    data = request.json
+    data = request.form
     name = data.get('name')
     price = data.get('price')
     ratings = data.get('ratings')
@@ -161,14 +175,24 @@ def create_product():
     no_of_reviews = data.get('no_of_reviews')
     description = data.get('description')
     category = data.get('category')
-    image = data.get('image')
     sold_by = data.get('sold_by')
+    image_file = request.files['image']
 
-    # Upload the image to Cloudinary
-    cloudinary_response = uploader.upload(image, folder=category, public_id=name)
+    if image_file and allowed_file(image_file.filename) and name and price:
+        filename = secure_filename(image_file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        image_file.save(filepath)
 
+        # List all files in the uploads folder
+        files = os.listdir(UPLOAD_FOLDER)
 
-    if name and price:
+        # Print the list of files
+        print("Files in the 'uploads' folder:")
+        for file in files:
+            print(file)
+        cloudinary_response = uploader.upload(filepath, folder=category, public_id=name)
+        os.remove(filepath)
+
         product_data = {
             'name': name,
             'price': price,
@@ -177,13 +201,13 @@ def create_product():
             'no_of_reviews': no_of_reviews,
             'description': description,
             'category': category,
-            'image': cloudinary_response['secure_url'],  # Use the secure URL provided by Cloudinary
+            'image': cloudinary_response['secure_url'],
             'sold_by': sold_by,
         }
         result = db.products.insert_one(product_data)
         return jsonify({'message': 'Product created successfully', 'product_id': str(result.inserted_id)}), 201
     else:
-        return jsonify({'error': 'Name and price are required fields'}), 400
+        return jsonify({'error': 'Name, price, and a valid image file are required fields'}), 400
 
 
 # Read (Retrieve Products)
